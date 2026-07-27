@@ -1,5 +1,6 @@
 {
   "buildCommand": "prisma generate && tsc",
   "installCommand": "npm install",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "framework": null
 }
