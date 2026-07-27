@@ -1,6 +1,7 @@
 {
-  "buildCommand": "prisma generate && tsc",
-  "installCommand": "npm install",
-  "outputDirectory": "dist",
-  "framework": null
+  "functions": {
+    "api/*.ts": {
+      "runtime": "@vercel/node"
+    }
+  }
 }
