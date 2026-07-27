@@ -4,7 +4,7 @@
   "description": "Rekaz Petroleum Management System Backend",
   "main": "dist/server.js",
   "scripts": {
-    "build": "prisma generate && tsc",
+    "build": "tsc",
     "start": "node dist/server.js",
     "dev": "nodemon --exec tsx src/server.ts",
     "dev:tsx": "tsx watch src/server.ts",
@@ -24,7 +24,7 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f app",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
