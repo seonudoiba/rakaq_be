@@ -1,0 +1,103 @@
+import { Router } from 'express';
+import { InventoryController } from './inventory.controller';  // Same directory
+import { authenticate } from '../../middleware/auth';
+import { requirePermission } from '../../middleware/rbac';
+import { validate } from '../../middleware/validation';
+import { param, query, body } from 'express-validator';
+
+const router = Router();
+const inventoryController = new InventoryController();
+
+// All routes require authentication
+router.use(authenticate);
+
+// Get tank monitoring for a station
+router.get(
+  '/tanks/:stationId',
+  requirePermission('inventory:read'),
+  validate([param('stationId').isUUID()]),
+  inventoryController.getTankMonitoring
+);
+
+// Get tank by ID
+router.get(
+  '/tanks/detail/:id',
+  requirePermission('inventory:read'),
+  validate([param('id').isUUID()]),
+  inventoryController.getTankById
+);
+
+// Update tank level
+router.put(
+  '/tanks/:id/level',
+  requirePermission('inventory:update'),
+  validate([
+    param('id').isUUID(),
+    body('currentLevel').isFloat({ min: 0 }),
+    body('percentage').isFloat({ min: 0, max: 100 }),
+  ]),
+  inventoryController.updateTankLevel
+);
+
+// Get inventory logs
+router.get(
+  '/logs/:stationId',
+  requirePermission('inventory:read'),
+  validate([
+    param('stationId').isUUID(),
+    query('startDate').optional().isISO8601(),
+    query('endDate').optional().isISO8601(),
+  ]),
+  inventoryController.getInventoryLogs
+);
+
+// Get product movement
+router.get(
+  '/movement/:stationId',
+  requirePermission('inventory:read'),
+  validate([
+    param('stationId').isUUID(),
+    query('productType').optional().isString(),
+    query('days').optional().isInt({ min: 1 }),
+  ]),
+  inventoryController.getProductMovement
+);
+
+// Get product prices
+router.get(
+  '/prices',
+  requirePermission('inventory:read'),
+  validate([query('stationId').optional().isUUID()]),
+  inventoryController.getProductPrices
+);
+
+// Update product price
+router.put(
+  '/prices',
+  requirePermission('inventory:update'),
+  validate([
+    body('stationId').optional().isUUID(),
+    body('productType').notEmpty(),
+    body('productName').notEmpty(),
+    body('unitPrice').isFloat({ min: 0 }),
+  ]),
+  inventoryController.updateProductPrice
+);
+
+// Get low stock alerts
+router.get(
+  '/alerts',
+  requirePermission('inventory:read'),
+  validate([query('stationId').optional().isUUID()]),
+  inventoryController.getLowStockAlerts
+);
+
+// Perform inventory audit
+router.post(
+  '/audit/:stationId',
+  requirePermission('inventory:update'),
+  validate([param('stationId').isUUID()]),
+  inventoryController.performAudit
+);
+
+export default router;

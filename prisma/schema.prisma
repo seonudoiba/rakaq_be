@@ -1,0 +1,478 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============= ENUMS =============
+enum UserRole {
+  SUPER_ADMIN
+  REGIONAL_MANAGER
+  SUPERVISOR
+  ATTENDANT
+  ACCOUNTANT
+}
+
+enum PaymentMethod {
+  CASH
+  POS
+  TRANSFER
+  CREDIT
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  VERIFIED
+  CANCELLED
+  REFUNDED
+}
+
+enum ExpenseCategory {
+  FUEL_FOR_GENS
+  MAINTENANCE
+  SALARIES
+  UTILITIES
+  ADMINISTRATIVE
+  OPERATIONAL
+}
+
+enum TankStatus {
+  NORMAL
+  WARNING
+  CRITICAL
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ============= CORE MODELS =============
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  password        String
+  firstName       String
+  lastName        String
+  phone           String
+  role            UserRole
+  stationId       String?
+  managedStationId String? @unique
+  regionId        String?
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  refreshToken    String?
+  profileImage    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // --- Relations ---
+  // User belongs to a Station (many-to-one)
+  station         Station?  @relation("UserStation", fields: [stationId], references: [id])
+  // User can be a manager of ONE Station (one-to-one)
+  managedStation  Station?  @relation("StationManager", fields: [managedStationId], references: [id])
+  region          Region?   @relation(fields: [regionId], references: [id])
+  
+  // One-to-many relations
+  sales           Sale[]    @relation("AttendantSales")
+  verifiedSales   Sale[]    @relation("VerifierSales")
+  pumpReadings    PumpReading[]
+  expensesCreated Expense[] @relation("CreatorExpenses")
+  expensesApproved Expense[] @relation("ApproverExpenses")
+  purchasesCreated PurchaseOrder[] @relation("CreatorPurchases")
+  purchasesApproved PurchaseOrder[] @relation("ApproverPurchases")
+  inventoryLogs   InventoryLog[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  supportTickets  SupportTicket[] @relation("TicketCreator")
+  assignedTickets SupportTicket[] @relation("TicketAssignee")
+  employeeRecords Employee[]
+  settings        Settings?
+  ticketComments  SupportTicketComment[]
+
+  @@map("users")
+}
+
+model Region {
+  id              String    @id @default(uuid())
+  name            String
+  code            String    @unique
+  description     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  users           User[]
+  stations        Station[]
+
+  @@map("regions")
+}
+
+model Station {
+  id              String    @id @default(uuid())
+  name            String
+  code            String    @unique
+  address         String
+  city            String
+  state           String
+  regionId        String
+  isActive        Boolean   @default(true)
+  latitude        Float?
+  longitude       Float?
+  phone           String?
+  email           String?
+  openingTime     String?
+  closingTime     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // --- Relations ---
+  region          Region    @relation(fields: [regionId], references: [id])
+  
+  // Station has ONE manager (one-to-one) - inverse of User.managedStation
+  manager         User?     @relation("StationManager")
+  
+  // Station has MANY users (one-to-many) - inverse of User.station
+  users           User[]    @relation("UserStation")
+  
+  tanks           Tank[]
+  pumps           Pump[]
+  sales           Sale[]
+  expenses        Expense[]
+  pumpReadings    PumpReading[]
+  inventoryLogs   InventoryLog[]
+  deliveries      Delivery[]
+  employees       Employee[]
+
+  @@map("stations")
+}
+
+model Tank {
+  id              String    @id @default(uuid())
+  stationId       String
+  productType     String
+  name            String
+  capacity        Float
+  currentLevel    Float     @default(0)
+  percentage      Float     @default(0)
+  status          TankStatus @default(NORMAL)
+  lastUpdated     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  station         Station   @relation(fields: [stationId], references: [id])
+  inventoryLogs   InventoryLog[]
+
+  @@map("tanks")
+}
+
+model Pump {
+  id              String    @id @default(uuid())
+  stationId       String
+  pumpNumber      Int
+  productType     String
+  openingMeter    Float     @default(0)
+  closingMeter    Float     @default(0)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  station         Station   @relation(fields: [stationId], references: [id])
+  readings        PumpReading[]
+  sales           Sale[]
+
+  @@unique([stationId, pumpNumber])
+  @@map("pumps")
+}
+
+model PumpReading {
+  id              String    @id @default(uuid())
+  pumpId          String
+  attendantId     String
+  stationId       String
+  openingMeter    Float
+  closingMeter    Float
+  litresSold      Float
+  expectedRevenue Float
+  readingDate     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  pump            Pump      @relation(fields: [pumpId], references: [id])
+  attendant       User      @relation(fields: [attendantId], references: [id])
+  station         Station   @relation(fields: [stationId], references: [id])
+
+  @@map("pump_readings")
+}
+
+model Sale {
+  id              String    @id @default(uuid())
+  stationId       String
+  pumpId          String?
+  productType     String
+  productName     String
+  quantity        Float
+  unitPrice       Float
+  totalAmount     Float
+  paymentMethod   PaymentMethod
+  status          TransactionStatus @default(COMPLETED)
+  customerName    String?
+  customerPhone   String?
+  attendantId     String
+  verifiedById    String?
+  verifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  station         Station   @relation(fields: [stationId], references: [id])
+  pump            Pump?     @relation(fields: [pumpId], references: [id])
+  attendant       User      @relation("AttendantSales", fields: [attendantId], references: [id])
+  verifiedBy      User?     @relation("VerifierSales", fields: [verifiedById], references: [id])
+
+  @@index([stationId, createdAt])
+  @@map("sales")
+}
+
+model Expense {
+  id              String    @id @default(uuid())
+  stationId       String
+  category        ExpenseCategory
+  description     String
+  amount          Float
+  voucherNumber   String    @unique
+  receiptUrl      String?
+  approvedById    String?
+  approvedAt      DateTime?
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  station         Station   @relation(fields: [stationId], references: [id])
+  approvedBy      User?     @relation("ApproverExpenses", fields: [approvedById], references: [id])
+  createdBy       User      @relation("CreatorExpenses", fields: [createdById], references: [id])
+
+  @@map("expenses")
+}
+
+model PurchaseOrder {
+  id              String    @id @default(uuid())
+  supplierName    String
+  supplierId      String?
+  supplierEmail   String?
+  supplierPhone   String?
+  productType     String
+  volume          Float
+  unitCost        Float
+  totalCost       Float
+  expectedDelivery DateTime?
+  actualDelivery  DateTime?
+  status          PurchaseOrderStatus @default(DRAFT)
+  orderNumber     String    @unique
+  invoiceNumber   String?
+  paymentStatus   String    @default("UNPAID")
+  createdById     String
+  approvedById    String?
+  approvedAt      DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  createdBy       User      @relation("CreatorPurchases", fields: [createdById], references: [id])
+  approvedBy      User?     @relation("ApproverPurchases", fields: [approvedById], references: [id])
+  deliveries      Delivery[]
+
+  @@map("purchase_orders")
+}
+
+model Delivery {
+  id              String    @id @default(uuid())
+  purchaseOrderId String
+  stationId       String?
+  tankerId        String
+  volume          Float
+  dispatchedAt    DateTime
+  deliveredAt     DateTime?
+  status          String    @default("IN_TRANSIT")
+  currentLocation String?
+  driverName      String?
+  driverPhone     String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  station         Station?  @relation(fields: [stationId], references: [id])
+  locationLogs    DeliveryLocationLog[]
+
+  @@map("deliveries")
+}
+
+model DeliveryLocationLog {
+  id              String    @id @default(uuid())
+  deliveryId      String
+  latitude        Float
+  longitude       Float
+  timestamp       DateTime  @default(now())
+  notes           String?
+
+  delivery        Delivery  @relation(fields: [deliveryId], references: [id])
+
+  @@map("delivery_location_logs")
+}
+
+model InventoryLog {
+  id              String    @id @default(uuid())
+  stationId       String
+  tankId          String?
+  productType     String
+  previousLevel   Float
+  newLevel        Float
+  adjustment      Float
+  reason          String
+  userId          String
+  createdAt       DateTime  @default(now())
+
+  station         Station   @relation(fields: [stationId], references: [id])
+  tank            Tank?     @relation(fields: [tankId], references: [id])
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@map("inventory_logs")
+}
+
+model Employee {
+  id              String    @id @default(uuid())
+  userId          String
+  stationId       String
+  employeeId      String    @unique
+  position        String
+  department      String
+  hireDate        DateTime
+  salary          Float?
+  bankName        String?
+  accountNumber   String?
+  emergencyContact String?
+  emergencyPhone  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id])
+  station         Station   @relation(fields: [stationId], references: [id])
+
+  @@map("employees")
+}
+
+model SupportTicket {
+  id              String    @id @default(uuid())
+  ticketNumber    String    @unique
+  title           String
+  description     String
+  status          SupportTicketStatus @default(OPEN)
+  priority        SupportTicketPriority @default(MEDIUM)
+  category        String
+  createdById     String
+  assignedToId    String?
+  resolvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  createdBy       User      @relation("TicketCreator", fields: [createdById], references: [id])
+  assignedTo      User?     @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  comments        SupportTicketComment[]
+
+  @@map("support_tickets")
+}
+
+model SupportTicketComment {
+  id              String    @id @default(uuid())
+  ticketId        String
+  userId          String
+  message         String
+  isInternal      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+
+  ticket          SupportTicket @relation(fields: [ticketId], references: [id])
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@map("support_ticket_comments")
+}
+
+model Settings {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  theme           String    @default("light")
+  language        String    @default("en")
+  notifications   Json      @default("{}")
+  preferences     Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@map("settings")
+}
+
+model Notification {
+  id              String    @id @default(uuid())
+  userId          String
+  title           String
+  message         String
+  type            String
+  isRead          Boolean   @default(false)
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id              String    @id @default(uuid())
+  userId          String
+  action          String
+  resourceType    String
+  resourceId      String?
+  details         Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime  @default(now())
+
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+model ProductPrice {
+  id          String   @id @default(uuid())
+  stationId   String?
+  productType String
+  productName String
+  unitPrice   Float
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([stationId, productType])
+  @@map("product_prices")
+}
