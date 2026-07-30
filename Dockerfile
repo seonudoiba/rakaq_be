@@ -10,7 +10,6 @@ RUN npm install
 
 COPY . .
 
-# Generate Prisma client
 RUN npx prisma generate
 
 # Production stage
@@ -18,8 +17,8 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Install bash
-RUN apk add --no-cache bash
+# Install bash and curl
+RUN apk add --no-cache bash curl
 
 RUN mkdir -p logs && chmod 777 logs
 
@@ -30,8 +29,8 @@ COPY --from=builder /usr/src/app/src ./src
 COPY --from=builder /usr/src/app/tsconfig.json ./
 COPY --from=builder /usr/src/app/scripts ./scripts
 
-# Make startup script executable
-RUN chmod +x scripts/startup.sh
+# Make scripts executable
+RUN chmod +x scripts/startup.sh scripts/db-setup.sh
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -42,5 +41,4 @@ USER nodejs
 
 EXPOSE 5000
 
-# Pass DATABASE_URL as environment variable at runtime
 CMD ["./scripts/startup.sh"]

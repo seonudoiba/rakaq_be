@@ -1,19 +1,30 @@
-#!/bin/sh
+#!/bin/bash
 
 echo "🚀 Starting application..."
 
-# Generate Prisma client
-echo "📦 Generating Prisma client..."
-npx prisma generate
+# Check if database is already set up
+if [ -f "/usr/src/app/.db-initialized" ]; then
+    echo "✅ Database already initialized. Starting server..."
+    exec npx tsx src/server.ts
+fi
 
-# Run migrations
-echo "🔄 Running database migrations..."
-npx prisma migrate deploy
+echo "⏳ First time setup - initializing database..."
+(
+  echo "📦 Generating Prisma client..."
+  npx prisma generate 2>&1
 
-# Seed database (only if needed - check if tables are empty)
-echo "🌱 Seeding database..."
-npx prisma db seed
+  echo "🔄 Running database migrations..."
+  npx prisma migrate deploy --schema=./prisma/schema.prisma 2>&1
 
-# Start the application
-echo "✅ Starting server..."
+  echo "🌱 Seeding database..."
+  npx prisma db seed --schema=./prisma/schema.prisma 2>&1
+
+  # Mark as initialized
+  touch /usr/src/app/.db-initialized
+  
+  echo "✅ Database setup complete at $(date)"
+) > /usr/src/app/logs/db-setup.log 2>&1 &
+
+# Start the server immediately
+echo "✅ Starting server on port ${PORT:-5000}..."
 exec npx tsx src/server.ts
