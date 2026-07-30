@@ -6,10 +6,13 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm install
+# Install dependencies
+RUN npm ci --only=production && \
+    npm install -D typescript tsx @types/node
 
 COPY . .
 
+# Generate Prisma client
 RUN npx prisma generate
 
 # Production stage
@@ -17,9 +20,12 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Create necessary directories with proper permissions
+# Install bash for better error handling
+RUN apk add --no-cache bash
+
 RUN mkdir -p logs && chmod 777 logs
 
+# Copy built files
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/package*.json ./
 COPY --from=builder /usr/src/app/prisma ./prisma
@@ -35,5 +41,8 @@ USER nodejs
 
 EXPOSE 5000
 
-# Run with tsx (no build needed)
-CMD ["npx", "tsx", "src/server.ts"]
+# Setup and start the application
+CMD npx prisma generate && \
+    npx prisma migrate deploy && \
+    npx prisma db seed && \
+    npx tsx src/server.ts
