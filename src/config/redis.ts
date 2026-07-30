@@ -6,23 +6,26 @@ class RedisClient {
 
   static getInstance(): Redis {
     if (!RedisClient.instance) {
-      RedisClient.instance = new Redis({
-        host: env.REDIS_URL.split('://')[1]?.split(':')[0] || 'localhost',
-        port: parseInt(env.REDIS_URL.split(':')[2]?.split('/')[0] || '6379'),
-        password: env.REDIS_PASSWORD || undefined,
-        retryStrategy: (times: number) => {
-          const delay = Math.min(times * 50, 2000);
-          return delay;
-        },
-        maxRetriesPerRequest: 3,
-      });
+      const redisUrl = env.REDIS_URL;
+
+      if (redisUrl && redisUrl.startsWith('redis')) {
+        RedisClient.instance = new Redis(redisUrl, {
+          password: env.REDIS_PASSWORD || undefined,
+          retryStrategy: (times: number) => Math.min(times * 100, 3000),
+          maxRetriesPerRequest: 3,
+          enableOfflineQueue: false,
+          lazyConnect: true,
+        });
+      } else {
+        RedisClient.instance = new Redis({
+          lazyConnect: true,
+          enableOfflineQueue: false,
+          maxRetriesPerRequest: 1,
+        });
+      }
 
       RedisClient.instance.on('error', (error) => {
-        console.error('Redis connection error:', error);
-      });
-
-      RedisClient.instance.on('connect', () => {
-        console.log('Redis connected successfully');
+        console.warn('⚠️ Redis issue:', error.message || error);
       });
     }
     return RedisClient.instance;

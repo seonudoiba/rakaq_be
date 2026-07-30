@@ -1,7 +1,26 @@
 {
+  "version": 2,
+  "buildCommand": "npx prisma generate && npx tsc --project tsconfig.build.json",
+  "outputDirectory": ".",
   "functions": {
-    "api/*.ts": {
-      "runtime": "@vercel/node"
+    "api/index.ts": {
+      "memory": 512,
+      "maxDuration": 30
     }
-  }
+  },
+  "routes": [
+    {
+      "src": "/health",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "/api/v1/(.*)",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.ts"
+    }
+  ]
 }
+

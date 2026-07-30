@@ -2,10 +2,11 @@
   "name": "rekaz-petroleum-backend",
   "version": "1.0.0",
   "description": "Rekaz Petroleum Management System Backend",
-  "main": "dist/server.js",
+  "main": "api/index.ts",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/server.js",
+    "build": "prisma generate && tsc",
+    "vercel-build": "prisma generate && tsc",
+    "start": "node dist/src/server.js",
     "dev": "nodemon --exec tsx src/server.ts",
     "dev:tsx": "tsx watch src/server.ts",
     "dev:direct": "tsx src/server.ts",
@@ -24,7 +25,7 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f app",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
