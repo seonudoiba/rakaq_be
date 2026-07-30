@@ -6,9 +6,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install dependencies
-RUN npm ci --only=production && \
-    npm install -D typescript tsx @types/node
+RUN npm install
 
 COPY . .
 
@@ -20,17 +18,20 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Install bash for better error handling
+# Install bash
 RUN apk add --no-cache bash
 
 RUN mkdir -p logs && chmod 777 logs
 
-# Copy built files
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/package*.json ./
 COPY --from=builder /usr/src/app/prisma ./prisma
 COPY --from=builder /usr/src/app/src ./src
 COPY --from=builder /usr/src/app/tsconfig.json ./
+COPY --from=builder /usr/src/app/scripts ./scripts
+
+# Make startup script executable
+RUN chmod +x scripts/startup.sh
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -41,8 +42,5 @@ USER nodejs
 
 EXPOSE 5000
 
-# Setup and start the application
-CMD npx prisma generate && \
-    npx prisma migrate deploy && \
-    npx prisma db seed && \
-    npx tsx src/server.ts
+# Pass DATABASE_URL as environment variable at runtime
+CMD ["./scripts/startup.sh"]
