@@ -39,20 +39,33 @@ app.use(
 );
 
 // Flexible CORS setup
+// app.use(
+//   cors({
+//     origin: (origin, callback) => {
+//       const allowedOrigin = env.FRONTEND_URL;
+//       if (!origin || allowedOrigin === '*' || !allowedOrigin) {
+//         return callback(null, true);
+//       }
+//       const origins = allowedOrigin.split(',').map((o) => o.trim());
+//       if (origins.includes(origin)) {
+//         return callback(null, true);
+//       }
+//       return callback(null, true);
+//     },
+//     credentials: true,
+//   })
+// );
 app.use(
   cors({
     origin: (origin, callback) => {
-      const allowedOrigin = env.FRONTEND_URL;
-      if (!origin || allowedOrigin === '*' || !allowedOrigin) {
-        return callback(null, true);
-      }
-      const origins = allowedOrigin.split(',').map((o) => o.trim());
-      if (origins.includes(origin)) {
-        return callback(null, true);
-      }
+      // Allow all origins for testing
+      // This will work with your HTTPS frontend
       return callback(null, true);
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Authorization']
   })
 );
 

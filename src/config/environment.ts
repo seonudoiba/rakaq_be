@@ -16,5 +16,5 @@ export const env = cleanEnv(process.env, {
   FRONTEND_URL: str({ default: '*' }),
   LOG_LEVEL: str({ choices: ['error', 'warn', 'info', 'debug'], default: 'info' }),
   RATE_LIMIT_WINDOW: num({ default: 900000 }),
-  RATE_LIMIT_MAX: num({ default: 100 }),
+  RATE_LIMIT_MAX: num({ default: 300 }),
 });
