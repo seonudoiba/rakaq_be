@@ -19,6 +19,7 @@
     "format": "prettier --write src/**/*.ts",
     "migrate": "npx prisma migrate dev",
     "migrate:prod": "npx prisma migrate deploy",
+    "migrate:setup": "node scripts/migrate.js",
     "seed": "npx prisma db seed",
     "studio": "npx prisma studio",
     "docker:build": "docker-compose build",
@@ -26,7 +27,7 @@
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f app",
     "postinstall": "prisma generate"
-  },
+  }
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },

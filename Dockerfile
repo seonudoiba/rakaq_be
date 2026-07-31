@@ -17,8 +17,8 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Install bash and curl
-RUN apk add --no-cache bash curl
+# Install bash for scripts
+RUN apk add --no-cache bash
 
 RUN mkdir -p logs && chmod 777 logs
 
@@ -26,11 +26,8 @@ COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/package*.json ./
 COPY --from=builder /usr/src/app/prisma ./prisma
 COPY --from=builder /usr/src/app/src ./src
-COPY --from=builder /usr/src/app/tsconfig.json ./
 COPY --from=builder /usr/src/app/scripts ./scripts
-
-# Make scripts executable
-RUN chmod +x scripts/startup.sh scripts/db-setup.sh
+COPY --from=builder /usr/src/app/tsconfig.json ./
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -41,4 +38,5 @@ USER nodejs
 
 EXPOSE 5000
 
-CMD ["./scripts/startup.sh"]
+# Run migration script then start server
+CMD node scripts/migrate.js && npx tsx src/server.ts
