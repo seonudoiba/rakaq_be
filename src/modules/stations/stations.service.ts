@@ -7,33 +7,26 @@ export class StationsService {
 
   async getAllStations(filters?: { regionId?: string; userId?: string }) {
     try {
-      console.log('🔍 [getAllStations] Starting with filters:', filters);
-      
       const cacheKey = `stations:all:${JSON.stringify(filters)}`;
-      console.log('🔍 [getAllStations] Cache key:', cacheKey);
       
       // Try to get from cache with error handling
       let cached = null;
       try {
-        console.log('🔍 [getAllStations] Attempting Redis get...');
         cached = await redis.get(cacheKey);
-        if (cached) {
-          console.log('✅ [getAllStations] Cache hit');
-          return JSON.parse(cached);
-        }
-        console.log('ℹ️ [getAllStations] Cache miss');
+        if (cached) return JSON.parse(cached);
       } catch (redisError) {
-        console.warn('⚠️ [getAllStations] Redis error:', redisError);
+        console.warn('Redis cache miss or error:', redisError);
       }
 
       // Build where clause
       const where: any = {};
+
       if (filters?.regionId) {
         where.regionId = filters.regionId;
       }
-      console.log('🔍 [getAllStations] Where clause:', where);
 
-      console.log('🔍 [getAllStations] Querying database...');
+      console.log('📊 Fetching stations with where clause:', where);
+
       const stations = await prisma.station.findMany({
         where,
         include: {
@@ -61,6 +54,7 @@ export class StationsService {
               currentLevel: true,
               percentage: true,
               status: true,
+              lastUpdated: true,  // Changed from lastReadingAt
             },
           },
           pumps: {
@@ -83,42 +77,32 @@ export class StationsService {
         },
         orderBy: { createdAt: 'desc' },
       });
-      console.log(`✅ [getAllStations] Found ${stations.length} stations`);
 
       // Try to cache the result
       try {
-        console.log('🔍 [getAllStations] Attempting Redis set...');
         await redis.setex(cacheKey, this.cacheTTL, JSON.stringify(stations));
-        console.log('✅ [getAllStations] Cache set successful');
       } catch (cacheError) {
-        console.warn('⚠️ [getAllStations] Failed to cache:', cacheError);
+        console.warn('Failed to cache stations:', cacheError);
       }
 
       return stations;
     } catch (error) {
-      console.error('❌ [getAllStations] Error:', error);
-      console.error('❌ [getAllStations] Error stack:', error instanceof Error ? error.stack : 'No stack');
+      console.error('Error in getAllStations:', error);
       throw error;
     }
   }
 
   async getStationById(id: string) {
     try {
-      console.log(`🔍 [getStationById] Getting station ${id}`);
-      
       const cacheKey = `station:${id}`;
       
       // Try to get from cache with error handling
       let cached = null;
       try {
         cached = await redis.get(cacheKey);
-        if (cached) {
-          console.log(`✅ [getStationById] Cache hit for ${id}`);
-          return JSON.parse(cached);
-        }
-        console.log(`ℹ️ [getStationById] Cache miss for ${id}`);
+        if (cached) return JSON.parse(cached);
       } catch (redisError) {
-        console.warn(`⚠️ [getStationById] Redis error for ${id}:`, redisError);
+        console.warn('Redis cache miss or error:', redisError);
       }
 
       console.log(`🔍 [getStationById] Querying database for ${id}...`);
@@ -150,7 +134,7 @@ export class StationsService {
               currentLevel: true,
               percentage: true,
               status: true,
-              lastReadingAt: true,
+              lastUpdated: true,  // Changed from lastReadingAt
             },
           },
           pumps: {
@@ -183,14 +167,13 @@ export class StationsService {
 
       try {
         await redis.setex(cacheKey, this.cacheTTL, JSON.stringify(station));
-        console.log(`✅ [getStationById] Cache set for ${id}`);
       } catch (cacheError) {
-        console.warn(`⚠️ [getStationById] Failed to cache ${id}:`, cacheError);
+        console.warn('Failed to cache station:', cacheError);
       }
 
       return station;
     } catch (error) {
-      console.error(`❌ [getStationById] Error for ID ${id}:`, error);
+      console.error(`Error in getStationById for ID ${id}:`, error);
       throw error;
     }
   }
