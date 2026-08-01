@@ -15,6 +15,17 @@ export enum PaymentMethod {
   CREDIT = 'CREDIT',
 }
 
+export interface RegisterData {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  role: string;
+  stationId?: string;
+  regionId?: string;
+}
+
 export enum TransactionStatus {
   PENDING = 'PENDING',
   COMPLETED = 'COMPLETED',
