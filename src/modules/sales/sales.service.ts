@@ -3,10 +3,12 @@ import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { InventoryService } from '../inventory/inventory.service';
+import { StationSettingsService } from '../stationSettings/stationSettings.service';
 
 export class SalesService {
   private readonly cacheTTL = 300; // 5 minutes
   private inventoryService = new InventoryService();
+  private stationSettingsService = new StationSettingsService();
 
   async getDailyReport(stationId: string, date: Date) {
     const startOfDay = new Date(date);
@@ -183,45 +185,124 @@ export class SalesService {
       throw new AppError('Unit price must be greater than 0', 400);
     }
 
-    // Create the sale
-    const sale = await prisma.sale.create({
-      data: {
-        stationId: data.stationId,
-        pumpId: data.pumpId || null,
-        productType: data.productType,
-        productName: finalProductName || data.productType,
-        quantity: data.quantity,
-        unitPrice: finalUnitPrice,
-        totalAmount: data.quantity * finalUnitPrice,
-        paymentMethod: data.paymentMethod,
-        customerName: data.customerName || null,
-        customerPhone: data.customerPhone || null,
-        attendantId: data.attendantId,
-        status: data.status || 'COMPLETED',
-      },
-      include: {
-        attendant: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
+    // Get station settings for correction factor
+    const correctionFactor = await this.stationSettingsService.getVolumeCorrectionFactor(data.stationId);
+    
+    // Calculate actual quantity after correction
+    // If meter reads 100L, actual is 96L (100 - 4%)
+    const actualQuantity = data.quantity * (1 - correctionFactor);
+
+    // Start transaction to ensure data consistency
+    return await prisma.$transaction(async (tx) => {
+      // 1. Create the sale with correction factors
+      const sale = await tx.sale.create({
+        data: {
+          stationId: data.stationId,
+          pumpId: data.pumpId || null,
+          productType: data.productType,
+          productName: finalProductName || data.productType,
+          quantity: data.quantity, // Raw meter reading
+          actualQuantity: actualQuantity, // Actual after correction
+          correctionFactor: correctionFactor,
+          unitPrice: finalUnitPrice,
+          totalAmount: data.quantity * finalUnitPrice,
+          paymentMethod: data.paymentMethod,
+          customerName: data.customerName || null,
+          customerPhone: data.customerPhone || null,
+          attendantId: data.attendantId,
+          status: data.status || 'COMPLETED',
         },
-        station: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
+        include: {
+          attendant: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
           },
+          station: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          pump: true,
         },
-      },
+      });
+
+      // 2. Update the tank inventory (use actual quantity)
+      if (data.pumpId && correctionFactor > 0) {
+        // Find the pump to get its product type and station
+        const pump = await tx.pump.findUnique({
+          where: { id: data.pumpId },
+          select: { stationId: true, productType: true },
+        });
+
+        if (pump) {
+          // Find the appropriate tank for this product
+          const tank = await tx.tank.findFirst({
+            where: {
+              stationId: pump.stationId,
+              productType: pump.productType,
+            },
+            orderBy: { currentLevel: 'desc' },
+          });
+
+          if (tank) {
+            // Deduct actual quantity from tank
+            const newLevel = Math.max(0, tank.currentLevel - actualQuantity);
+            const percentage = (newLevel / tank.capacity) * 100;
+            
+            // Get thresholds from settings
+            const thresholds = await this.stationSettingsService.getStockThresholds(data.stationId);
+            
+            // Determine status based on percentage
+            let status: 'NORMAL' | 'WARNING' | 'CRITICAL' = 'NORMAL';
+            if (percentage <= thresholds.criticalStockThreshold) {
+              status = 'CRITICAL';
+            } else if (percentage <= thresholds.lowStockThreshold) {
+              status = 'WARNING';
+            }
+
+            // Update tank
+            await tx.tank.update({
+              where: { id: tank.id },
+              data: {
+                currentLevel: newLevel,
+                percentage: percentage,
+                status: status,
+                lastUpdated: new Date(),
+              },
+            });
+
+            // Log inventory change
+            await tx.inventoryLog.create({
+              data: {
+                stationId: pump.stationId,
+                tankId: tank.id,
+                productType: pump.productType,
+                previousLevel: tank.currentLevel,
+                newLevel: newLevel,
+                adjustment: -actualQuantity,
+                reason: `Sale #${sale.id} - ${data.quantity}L raw (${actualQuantity}L actual after ${(correctionFactor * 100).toFixed(1)}% correction)`,
+                userId: data.attendantId,
+              },
+            });
+
+            logger.info(`📦 Inventory updated: Tank ${tank.id} reduced by ${actualQuantity}L (raw: ${data.quantity}L)`);
+          } else {
+            logger.warn(`⚠️ No tank found for product ${pump.productType} at station ${pump.stationId}`);
+          }
+        }
+      }
+
+      // Invalidate cache
+      await this.invalidateCache(data.stationId);
+
+      logger.info(`✅ Sale created: ${sale.id} for station ${data.stationId}`);
+      return sale;
     });
-
-    // Invalidate cache
-    await this.invalidateCache(data.stationId);
-
-    logger.info(`✅ Sale created: ${sale.id} for station ${data.stationId}`);
-    return sale;
   }
 
   async verifySale(saleId: string, verifierId: string) {
@@ -272,6 +353,7 @@ export class SalesService {
             lastName: true,
           },
         },
+        pump: true,
       },
       orderBy: {
         createdAt: 'desc',

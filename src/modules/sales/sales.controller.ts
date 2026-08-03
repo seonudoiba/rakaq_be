@@ -68,7 +68,7 @@ export class SalesController {
     }
   };
 
-  
+
   createSale = async (req: AuthRequest, res: Response) => {
     try {
       // Log the request body for debugging

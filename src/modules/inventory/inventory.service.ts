@@ -3,9 +3,11 @@ import { redis } from '../../config/redis';
 import { AppError } from '../../middleware/errorHandler';
 import { logger } from '../../config/logger';
 import { TankStatus } from '@prisma/client';
+import { StationSettingsService } from './../stationSettings/stationSettings.service';
 
 export class InventoryService {
   private readonly cacheTTL = 300;
+  private stationSettingsService = new StationSettingsService();
 
   async getTankMonitoring(stationId: string) {
     const cacheKey = `inventory:tanks:${stationId}`;
@@ -98,6 +100,57 @@ export class InventoryService {
 
     await this.invalidateCache(tank.stationId, id);
     return tank;
+  }
+
+  async updateTankLevelFromSale(stationId: string, tankId: string, actualQuantity: number, userId: string) {
+    const tank = await prisma.tank.findUnique({
+      where: { id: tankId },
+    });
+
+    if (!tank) {
+      throw new AppError('Tank not found', 404);
+    }
+
+    const newLevel = Math.max(0, tank.currentLevel - actualQuantity);
+    const percentage = (newLevel / tank.capacity) * 100;
+    
+    // Get thresholds from settings
+    const thresholds = await this.stationSettingsService.getStockThresholds(stationId);
+    
+    // Determine status based on percentage
+    let status: 'NORMAL' | 'WARNING' | 'CRITICAL' = 'NORMAL';
+    if (percentage <= thresholds.criticalStockThreshold) {
+      status = 'CRITICAL';
+    } else if (percentage <= thresholds.lowStockThreshold) {
+      status = 'WARNING';
+    }
+
+    const updatedTank = await prisma.tank.update({
+      where: { id: tankId },
+      data: {
+        currentLevel: newLevel,
+        percentage: percentage,
+        status: status,
+        lastUpdated: new Date(),
+      },
+    });
+
+    // Log inventory change
+    await prisma.inventoryLog.create({
+      data: {
+        stationId,
+        tankId: tank.id,
+        productType: tank.productType,
+        previousLevel: tank.currentLevel,
+        newLevel: newLevel,
+        adjustment: -actualQuantity,
+        reason: `Sale deduction - ${actualQuantity}L`,
+        userId: userId,
+      },
+    });
+
+    await this.invalidateCache(stationId, tankId);
+    return updatedTank;
   }
 
   async getInventoryLogs(stationId: string, startDate?: Date, endDate?: Date) {
