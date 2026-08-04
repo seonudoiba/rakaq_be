@@ -21,7 +21,7 @@ export interface RegisterData {
   firstName: string;
   lastName: string;
   phone: string;
-  role: string;
+  role: UserRole;
   stationId?: string;
   regionId?: string;
 }

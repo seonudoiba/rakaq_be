@@ -54,7 +54,7 @@ export class StationsService {
               currentLevel: true,
               percentage: true,
               status: true,
-              lastUpdated: true,  // Changed from lastReadingAt
+              lastUpdated: true,
             },
           },
           pumps: {
@@ -134,7 +134,7 @@ export class StationsService {
               currentLevel: true,
               percentage: true,
               status: true,
-              lastUpdated: true,  // Changed from lastReadingAt
+              lastUpdated: true,
             },
           },
           pumps: {
@@ -205,6 +205,7 @@ export class StationsService {
           closingTime: data.closingTime || '18:00',
           latitude: data.latitude ? parseFloat(data.latitude) : null,
           longitude: data.longitude ? parseFloat(data.longitude) : null,
+          imageUrl: data.imageUrl || null, // ✅ Add imageUrl support
         },
       });
       console.log(`✅ [createStation] Created station ${station.id}`);
@@ -269,6 +270,7 @@ export class StationsService {
           closingTime: data.closingTime || '18:00',
           latitude: data.latitude ? parseFloat(data.latitude) : null,
           longitude: data.longitude ? parseFloat(data.longitude) : null,
+          imageUrl: data.imageUrl !== undefined ? data.imageUrl : existingStation.imageUrl, // ✅ Update imageUrl
         },
       });
       console.log(`✅ [updateStation] Updated station ${id}`);
