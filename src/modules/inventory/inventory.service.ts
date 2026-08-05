@@ -24,6 +24,11 @@ export class InventoryService {
             code: true,
           },
         },
+        pumps: true,
+        inventoryLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -57,9 +62,19 @@ export class InventoryService {
             code: true,
           },
         },
+        pumps: true,
         inventoryLogs: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
           orderBy: { createdAt: 'desc' },
-          take: 10,
+          take: 15,
         },
       },
     });
@@ -70,6 +85,106 @@ export class InventoryService {
 
     await redis.setex(cacheKey, this.cacheTTL, JSON.stringify(tank));
     return tank;
+  }
+
+  async createTank(data: { stationId: string; name: string; productType: string; capacity: number; currentLevel?: number; userId?: string }) {
+    const capacity = parseFloat(String(data.capacity));
+    const currentLevel = parseFloat(String(data.currentLevel || 0));
+    const percentage = Math.min(100, Math.max(0, (currentLevel / capacity) * 100));
+    const status = percentage < 20 ? TankStatus.CRITICAL : percentage < 35 ? TankStatus.WARNING : TankStatus.NORMAL;
+
+    const tank = await prisma.tank.create({
+      data: {
+        stationId: data.stationId,
+        name: data.name,
+        productType: data.productType,
+        capacity,
+        currentLevel,
+        percentage,
+        status,
+      },
+      include: {
+        station: { select: { id: true, name: true, code: true } },
+        pumps: true,
+      },
+    });
+
+    if (currentLevel > 0) {
+      await prisma.inventoryLog.create({
+        data: {
+          stationId: data.stationId,
+          tankId: tank.id,
+          productType: data.productType,
+          previousLevel: 0,
+          newLevel: currentLevel,
+          adjustment: currentLevel,
+          reason: 'Initial tank setup',
+          userId: data.userId || 'system',
+        },
+      });
+    }
+
+    await this.invalidateCache(data.stationId);
+    return tank;
+  }
+
+  async updateTank(id: string, data: { name?: string; productType?: string; capacity?: number; currentLevel?: number; userId?: string }) {
+    const existing = await prisma.tank.findUnique({ where: { id } });
+    if (!existing) throw new AppError('Tank not found', 404);
+
+    const capacity = data.capacity !== undefined ? parseFloat(String(data.capacity)) : existing.capacity;
+    const currentLevel = data.currentLevel !== undefined ? parseFloat(String(data.currentLevel)) : existing.currentLevel;
+    const percentage = Math.min(100, Math.max(0, (currentLevel / capacity) * 100));
+    const status = percentage < 20 ? TankStatus.CRITICAL : percentage < 35 ? TankStatus.WARNING : TankStatus.NORMAL;
+
+    const tank = await prisma.tank.update({
+      where: { id },
+      data: {
+        name: data.name ?? existing.name,
+        productType: data.productType ?? existing.productType,
+        capacity,
+        currentLevel,
+        percentage,
+        status,
+        lastUpdated: new Date(),
+      },
+      include: {
+        station: { select: { id: true, name: true, code: true } },
+        pumps: true,
+        inventoryLogs: { take: 10, orderBy: { createdAt: 'desc' } },
+      },
+    });
+
+    if (data.currentLevel !== undefined && data.currentLevel !== existing.currentLevel) {
+      await prisma.inventoryLog.create({
+        data: {
+          stationId: existing.stationId,
+          tankId: existing.id,
+          productType: tank.productType,
+          previousLevel: existing.currentLevel,
+          newLevel: currentLevel,
+          adjustment: currentLevel - existing.currentLevel,
+          reason: 'Tank level update',
+          userId: data.userId || 'system',
+        },
+      });
+    }
+
+    await this.invalidateCache(existing.stationId, id);
+    return tank;
+  }
+
+  async deleteTank(id: string) {
+    const existing = await prisma.tank.findUnique({ where: { id } });
+    if (!existing) throw new AppError('Tank not found', 404);
+
+    await prisma.pump.updateMany({
+      where: { tankId: id },
+      data: { tankId: null },
+    });
+
+    await prisma.tank.delete({ where: { id } });
+    await this.invalidateCache(existing.stationId, id);
   }
 
   async updateTankLevel(id: string, data: { currentLevel: number; percentage: number }) {

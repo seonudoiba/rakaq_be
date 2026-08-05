@@ -195,6 +195,7 @@ model Tank {
   // --- Relations ---
   station         Station   @relation(fields: [stationId], references: [id])
   inventoryLogs   InventoryLog[]
+  pumps           Pump[]
 
   @@map("tanks")
 }
@@ -202,6 +203,7 @@ model Tank {
 model Pump {
   id              String    @id @default(uuid())
   stationId       String
+  tankId          String?
   pumpNumber      Int
   productType     String
   openingMeter    Float     @default(0)
@@ -212,6 +214,7 @@ model Pump {
 
   // --- Relations ---
   station         Station   @relation(fields: [stationId], references: [id])
+  tank            Tank?     @relation(fields: [tankId], references: [id])
   readings        PumpReading[]
   sales           Sale[]
 

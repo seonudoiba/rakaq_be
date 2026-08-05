@@ -27,6 +27,42 @@ router.get(
   inventoryController.getTankById
 );
 
+// Create a new tank
+router.post(
+  '/tanks',
+  requirePermission('inventory:update'),
+  validate([
+    body('stationId').isUUID(),
+    body('name').notEmpty(),
+    body('productType').notEmpty(),
+    body('capacity').isFloat({ min: 0 }),
+    body('currentLevel').optional().isFloat({ min: 0 }),
+  ]),
+  inventoryController.createTank
+);
+
+// Update tank details
+router.put(
+  '/tanks/:id',
+  requirePermission('inventory:update'),
+  validate([
+    param('id').isUUID(),
+    body('name').optional().notEmpty(),
+    body('productType').optional().notEmpty(),
+    body('capacity').optional().isFloat({ min: 0 }),
+    body('currentLevel').optional().isFloat({ min: 0 }),
+  ]),
+  inventoryController.updateTank
+);
+
+// Delete tank
+router.delete(
+  '/tanks/:id',
+  requirePermission('inventory:update'),
+  validate([param('id').isUUID()]),
+  inventoryController.deleteTank
+);
+
 // Update tank level
 router.put(
   '/tanks/:id/level',

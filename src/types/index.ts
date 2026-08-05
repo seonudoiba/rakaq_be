@@ -91,6 +91,7 @@ export interface User {
   region?: Region;
   settings?: Settings;
   employeeRecords?: Employee[];
+  imageUrl?: string;
 }
 
 export interface Region {

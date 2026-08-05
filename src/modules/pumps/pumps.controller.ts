@@ -88,6 +88,7 @@ export class PumpsController {
         productType: req.body.productType,
         openingMeter: req.body.openingMeter || 0,
         closingMeter: req.body.closingMeter || 0,
+        tankId: req.body.tankId || undefined,
       };
 
       // Validate required fields

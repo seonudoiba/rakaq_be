@@ -255,23 +255,28 @@ export class StationsService {
       }
 
       // Update station
+      const stationData: any = {
+        name: data.name,
+        code: data.code,
+        address: data.address,
+        city: data.city,
+        state: data.state,
+        regionId: data.regionId,
+        phone: data.phone || null,
+        email: data.email || null,
+        openingTime: data.openingTime || '08:00',
+        closingTime: data.closingTime || '18:00',
+        latitude: data.latitude ? parseFloat(data.latitude) : null,
+        longitude: data.longitude ? parseFloat(data.longitude) : null,
+      };
+
+      if (data.imageUrl !== undefined) {
+        stationData.imageUrl = data.imageUrl || null;
+      }
+
       const station = await prisma.station.update({
         where: { id },
-        data: {
-          name: data.name,
-          code: data.code,
-          address: data.address,
-          city: data.city,
-          state: data.state,
-          regionId: data.regionId,
-          phone: data.phone || null,
-          email: data.email || null,
-          openingTime: data.openingTime || '08:00',
-          closingTime: data.closingTime || '18:00',
-          latitude: data.latitude ? parseFloat(data.latitude) : null,
-          longitude: data.longitude ? parseFloat(data.longitude) : null,
-          imageUrl: data.imageUrl !== undefined ? data.imageUrl : existingStation.imageUrl, // ✅ Update imageUrl
-        },
+        data: stationData,
       });
       console.log(`✅ [updateStation] Updated station ${id}`);
 

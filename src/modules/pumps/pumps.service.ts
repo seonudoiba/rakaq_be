@@ -113,15 +113,28 @@ export class PumpsService {
       throw new AppError(`Pump #${data.pumpNumber} already exists at this station`, 409);
     }
 
+    const pumpData: any = {
+      stationId: data.stationId,
+      pumpNumber: data.pumpNumber,
+      productType: data.productType,
+      openingMeter: data.openingMeter || 0,
+      closingMeter: data.closingMeter || 0,
+      isActive: true,
+    };
+
+    if (data.tankId) {
+      const tank = await prisma.tank.findUnique({ where: { id: data.tankId } });
+      if (!tank) {
+        throw new AppError('Tank not found', 404);
+      }
+      if (tank.stationId !== data.stationId) {
+        throw new AppError('Tank must belong to the same station as the pump', 400);
+      }
+      pumpData.tankId = data.tankId;
+    }
+
     const pump = await prisma.pump.create({
-      data: {
-        stationId: data.stationId,
-        pumpNumber: data.pumpNumber,
-        productType: data.productType,
-        openingMeter: data.openingMeter || 0,
-        closingMeter: data.closingMeter || 0,
-        isActive: true,
-      },
+      data: pumpData,
     });
 
     await this.invalidateCache(data.stationId);
@@ -153,15 +166,32 @@ export class PumpsService {
       }
     }
 
+    const updateData: any = {
+      pumpNumber: data.pumpNumber,
+      productType: data.productType,
+      openingMeter: data.openingMeter,
+      closingMeter: data.closingMeter,
+      isActive: data.isActive,
+    };
+
+    if (data.tankId !== undefined) {
+      if (data.tankId === null || data.tankId === '') {
+        updateData.tankId = null;
+      } else {
+        const tank = await prisma.tank.findUnique({ where: { id: data.tankId } });
+        if (!tank) {
+          throw new AppError('Tank not found', 404);
+        }
+        if (tank.stationId !== existingPump.stationId) {
+          throw new AppError('Tank must belong to the same station as the pump', 400);
+        }
+        updateData.tankId = data.tankId;
+      }
+    }
+
     const pump = await prisma.pump.update({
       where: { id },
-      data: {
-        pumpNumber: data.pumpNumber,
-        productType: data.productType,
-        openingMeter: data.openingMeter,
-        closingMeter: data.closingMeter,
-        isActive: data.isActive,
-      },
+      data: updateData,
     });
 
     await this.invalidateCache(pump.stationId, id);
@@ -291,7 +321,7 @@ export class PumpsService {
       await redis.del(...keys);
     }
   }
-  
+
   async deletePump(id: string) {
     // Check if pump exists
     const pump = await prisma.pump.findUnique({

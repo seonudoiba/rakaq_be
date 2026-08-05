@@ -3,8 +3,10 @@ import { AuthRequest } from '../../middleware/auth';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { getStringParam } from '../../utils/helpers';
+import { InventoryService } from './inventory.service';
 
 export class InventoryController {
+  private inventoryService = new InventoryService();
   // Get tank monitoring for a station
   getTankMonitoring = async (req: AuthRequest, res: Response) => {
     try {
@@ -17,14 +19,11 @@ export class InventoryController {
         });
       }
 
-      const tanks = await prisma.tank.findMany({
-        where: { stationId },
-        orderBy: { name: 'asc' },
-      });
+      const data = await this.inventoryService.getTankMonitoring(stationId);
 
       res.json({
         success: true,
-        data: { tanks },
+        data,
       });
     } catch (error: any) {
       logger.error('Get tank monitoring error:', error);
@@ -47,25 +46,7 @@ export class InventoryController {
         });
       }
 
-      const tank = await prisma.tank.findUnique({
-        where: { id },
-        include: {
-          station: {
-            select: {
-              id: true,
-              name: true,
-              code: true,
-            },
-          },
-        },
-      });
-
-      if (!tank) {
-        return res.status(404).json({
-          success: false,
-          message: 'Tank not found',
-        });
-      }
+      const tank = await this.inventoryService.getTankById(id);
 
       res.json({
         success: true,
@@ -76,6 +57,80 @@ export class InventoryController {
       res.status(error.statusCode || 500).json({
         success: false,
         message: error.message || 'Failed to get tank',
+      });
+    }
+  };
+
+  // Create a new tank
+  createTank = async (req: AuthRequest, res: Response) => {
+    try {
+      const { stationId, name, productType, capacity, currentLevel } = req.body;
+
+      const tank = await this.inventoryService.createTank({
+        stationId,
+        name,
+        productType,
+        capacity,
+        currentLevel,
+        userId: req.user?.id,
+      });
+
+      res.status(201).json({
+        success: true,
+        data: tank,
+      });
+    } catch (error: any) {
+      logger.error('Create tank error:', error);
+      res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to create tank',
+      });
+    }
+  };
+
+  // Update tank details
+  updateTank = async (req: AuthRequest, res: Response) => {
+    try {
+      const id = getStringParam(req.params.id);
+      const { name, productType, capacity, currentLevel } = req.body;
+
+      const tank = await this.inventoryService.updateTank(id, {
+        name,
+        productType,
+        capacity,
+        currentLevel,
+        userId: req.user?.id,
+      });
+
+      res.json({
+        success: true,
+        data: tank,
+      });
+    } catch (error: any) {
+      logger.error('Update tank error:', error);
+      res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to update tank',
+      });
+    }
+  };
+
+  // Delete tank
+  deleteTank = async (req: AuthRequest, res: Response) => {
+    try {
+      const id = getStringParam(req.params.id);
+
+      await this.inventoryService.deleteTank(id);
+
+      res.json({
+        success: true,
+        message: 'Tank deleted successfully',
+      });
+    } catch (error: any) {
+      logger.error('Delete tank error:', error);
+      res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || 'Failed to delete tank',
       });
     }
   };
