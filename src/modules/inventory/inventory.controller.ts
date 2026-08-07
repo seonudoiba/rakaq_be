@@ -7,6 +7,7 @@ import { InventoryService } from './inventory.service';
 
 export class InventoryController {
   private inventoryService = new InventoryService();
+  
   // Get tank monitoring for a station
   getTankMonitoring = async (req: AuthRequest, res: Response) => {
     try {
@@ -66,18 +67,26 @@ export class InventoryController {
     try {
       const { stationId, name, productType, capacity, currentLevel } = req.body;
 
+      if (!stationId || !name || !productType || !capacity) {
+        return res.status(400).json({
+          success: false,
+          message: 'stationId, name, productType, and capacity are required',
+        });
+      }
+
       const tank = await this.inventoryService.createTank({
         stationId,
         name,
         productType,
         capacity,
-        currentLevel,
+        currentLevel: currentLevel || 0,
         userId: req.user?.id,
       });
 
       res.status(201).json({
         success: true,
         data: tank,
+        message: 'Tank created successfully',
       });
     } catch (error: any) {
       logger.error('Create tank error:', error);
@@ -94,6 +103,13 @@ export class InventoryController {
       const id = getStringParam(req.params.id);
       const { name, productType, capacity, currentLevel } = req.body;
 
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tank ID is required',
+        });
+      }
+
       const tank = await this.inventoryService.updateTank(id, {
         name,
         productType,
@@ -105,6 +121,7 @@ export class InventoryController {
       res.json({
         success: true,
         data: tank,
+        message: 'Tank updated successfully',
       });
     } catch (error: any) {
       logger.error('Update tank error:', error);
@@ -119,6 +136,13 @@ export class InventoryController {
   deleteTank = async (req: AuthRequest, res: Response) => {
     try {
       const id = getStringParam(req.params.id);
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tank ID is required',
+        });
+      }
 
       await this.inventoryService.deleteTank(id);
 
@@ -155,37 +179,7 @@ export class InventoryController {
         });
       }
 
-      // Determine status based on percentage
-      let status: 'NORMAL' | 'WARNING' | 'CRITICAL' = 'NORMAL';
-      if (percentage <= 15) {
-        status = 'CRITICAL';
-      } else if (percentage <= 30) {
-        status = 'WARNING';
-      }
-
-      const tank = await prisma.tank.update({
-        where: { id },
-        data: {
-          currentLevel,
-          percentage,
-          status,
-          lastUpdated: new Date(),
-        },
-      });
-
-      // Log inventory change
-      await prisma.inventoryLog.create({
-        data: {
-          stationId: tank.stationId,
-          tankId: tank.id,
-          productType: tank.productType,
-          previousLevel: 0,
-          newLevel: currentLevel,
-          adjustment: currentLevel,
-          reason: 'Manual update',
-          userId: req.user!.id,
-        },
-      });
+      const tank = await this.inventoryService.updateTankLevel(id, { currentLevel, percentage });
 
       res.json({
         success: true,
@@ -213,40 +207,11 @@ export class InventoryController {
         });
       }
 
-      const where: any = { stationId };
-
-      if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) {
-          where.createdAt.gte = new Date(startDate as string);
-        }
-        if (endDate) {
-          where.createdAt.lte = new Date(endDate as string);
-        }
-      }
-
-      const logs = await prisma.inventoryLog.findMany({
-        where,
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-          tank: {
-            select: {
-              id: true,
-              name: true,
-              productType: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      });
+      const logs = await this.inventoryService.getInventoryLogs(
+        stationId,
+        startDate ? new Date(startDate as string) : undefined,
+        endDate ? new Date(endDate as string) : undefined
+      );
 
       res.json({
         success: true,
@@ -274,63 +239,15 @@ export class InventoryController {
         });
       }
 
-      const where: any = { stationId };
-
-      if (productType) {
-        where.productType = productType as string;
-      }
-
-      // Default to last 30 days if not specified
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - (days ? parseInt(days as string) : 30));
-
-      where.createdAt = {
-        gte: startDate,
-      };
-
-      const movements = await prisma.inventoryLog.findMany({
-        where,
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-          tank: {
-            select: {
-              id: true,
-              name: true,
-              productType: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      // Calculate summary
-      const summary = movements.reduce(
-        (acc, log) => {
-          const adjustment = log.adjustment || 0;
-          if (adjustment > 0) {
-            acc.totalInflow += adjustment;
-          } else {
-            acc.totalOutflow += Math.abs(adjustment);
-          }
-          return acc;
-        },
-        { totalInflow: 0, totalOutflow: 0, netChange: 0 }
+      const data = await this.inventoryService.getProductMovement(
+        stationId,
+        productType as string,
+        days ? parseInt(days as string) : 30
       );
-      summary.netChange = summary.totalInflow - summary.totalOutflow;
 
       res.json({
         success: true,
-        data: {
-          movements,
-          summary,
-        },
+        data,
       });
     } catch (error: any) {
       logger.error('Get product movement error:', error);
@@ -341,22 +258,20 @@ export class InventoryController {
     }
   };
 
-  // Get product prices
+  // Get product prices - FIXED: Proper route handler
   getProductPrices = async (req: AuthRequest, res: Response) => {
     try {
-      const { stationId } = req.query;
+      const { stationId, regionId } = req.query;
 
-      // Default product prices
-      const defaultPrices = [
-        { productType: 'PMS', productName: 'Premium Motor Spirit', unitPrice: 850 },
-        { productType: 'AGO', productName: 'Automotive Gas Oil', unitPrice: 950 },
-        { productType: 'DPK', productName: 'Dual Purpose Kerosene', unitPrice: 500 },
-        { productType: 'LPG', productName: 'Liquefied Petroleum Gas', unitPrice: 1200 },
-      ];
+      // Use the service to get prices from database
+      const prices = await this.inventoryService.getProductPrices(
+        stationId as string,
+        regionId as string
+      );
 
       res.json({
         success: true,
-        data: defaultPrices,
+        data: prices,
       });
     } catch (error: any) {
       logger.error('Get product prices error:', error);
@@ -367,10 +282,17 @@ export class InventoryController {
     }
   };
 
-  // Update product price
+  // Update product price - FIXED: Proper route handler with scope support
   updateProductPrice = async (req: AuthRequest, res: Response) => {
     try {
-      const { productType, productName, unitPrice } = req.body;
+      const { 
+        stationId, 
+        regionId,
+        productType, 
+        productName, 
+        unitPrice,
+        applyToAll
+      } = req.body;
 
       if (!productType || !productName || unitPrice === undefined) {
         return res.status(400).json({
@@ -379,14 +301,21 @@ export class InventoryController {
         });
       }
 
+      // Use the inventory service to update the price
+      const price = await this.inventoryService.updateProductPrice({
+        stationId: stationId || undefined,
+        regionId: regionId || undefined,
+        productType,
+        productName,
+        unitPrice,
+        userId: req.user!.id,
+        applyToAll: applyToAll || false,
+      });
+
       res.json({
         success: true,
-        data: {
-          productType,
-          productName,
-          unitPrice,
-          message: 'Price updated successfully',
-        },
+        data: price,
+        message: 'Price updated successfully',
       });
     } catch (error: any) {
       logger.error('Update product price error:', error);
@@ -402,43 +331,7 @@ export class InventoryController {
     try {
       const { stationId } = req.query;
 
-      const where: any = {};
-      if (stationId) {
-        where.stationId = stationId as string;
-      }
-
-      // Get tanks with low stock (critical or warning)
-      const tanks = await prisma.tank.findMany({
-        where: {
-          ...where,
-          status: {
-            in: ['CRITICAL', 'WARNING'],
-          },
-        },
-        include: {
-          station: {
-            select: {
-              id: true,
-              name: true,
-              code: true,
-            },
-          },
-        },
-        orderBy: { percentage: 'asc' },
-      });
-
-      const alerts = tanks.map(tank => ({
-        id: tank.id,
-        name: tank.name,
-        productType: tank.productType,
-        currentLevel: tank.currentLevel,
-        percentage: tank.percentage,
-        status: tank.status,
-        station: tank.station,
-        recommendation: tank.status === 'CRITICAL'
-          ? 'Immediate refill required!'
-          : 'Schedule refill soon',
-      }));
+      const alerts = await this.inventoryService.getLowStockAlerts(stationId as string);
 
       res.json({
         success: true,
@@ -474,49 +367,15 @@ export class InventoryController {
         });
       }
 
-      // Get current tank
-      const tank = await prisma.tank.findUnique({
-        where: { id: tankId },
-      });
-
-      if (!tank) {
-        return res.status(404).json({
-          success: false,
-          message: 'Tank not found',
-        });
-      }
-
-      // Update tank level
-      const percentage = (actualLevel / tank.capacity) * 100;
-      const status = percentage <= 15 ? 'CRITICAL' : percentage <= 30 ? 'WARNING' : 'NORMAL';
-
-      const updatedTank = await prisma.tank.update({
-        where: { id: tankId },
-        data: {
-          currentLevel: actualLevel,
-          percentage,
-          status,
-          lastUpdated: new Date(),
-        },
-      });
-
-      // Log the audit
-      await prisma.inventoryLog.create({
-        data: {
-          stationId,
-          tankId,
-          productType: tank.productType,
-          previousLevel: tank.currentLevel,
-          newLevel: actualLevel,
-          adjustment: actualLevel - tank.currentLevel,
-          reason: `Audit: ${notes || 'Manual inventory audit'}`,
-          userId: req.user!.id,
-        },
+      const result = await this.inventoryService.performAudit(stationId, {
+        tankId,
+        actualLevel,
+        notes,
       });
 
       res.json({
         success: true,
-        data: updatedTank,
+        data: result,
         message: 'Inventory audit completed successfully',
       });
     } catch (error: any) {

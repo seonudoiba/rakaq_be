@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { InventoryController } from './inventory.controller';  // Same directory
+import { InventoryController } from './inventory.controller';
 import { authenticate } from '../../middleware/auth';
 import { requirePermission } from '../../middleware/rbac';
 import { validate } from '../../middleware/validation';
@@ -10,6 +10,32 @@ const inventoryController = new InventoryController();
 
 // All routes require authentication
 router.use(authenticate);
+
+// Get product prices
+router.get(
+  '/prices',
+  requirePermission('inventory:read'),
+  validate([
+    query('stationId').optional().isUUID(),
+    query('regionId').optional().isUUID(),
+  ]),
+  inventoryController.getProductPrices
+);
+
+// Update product price
+router.put(
+  '/prices',
+  requirePermission('inventory:update'),
+  validate([
+    body('stationId').optional().isUUID(),
+    body('regionId').optional().isUUID(),
+    body('productType').notEmpty(),
+    body('productName').notEmpty(),
+    body('unitPrice').isFloat({ min: 0 }),
+    body('applyToAll').optional().isBoolean(),
+  ]),
+  inventoryController.updateProductPrice
+);
 
 // Get tank monitoring for a station
 router.get(
@@ -97,27 +123,6 @@ router.get(
     query('days').optional().isInt({ min: 1 }),
   ]),
   inventoryController.getProductMovement
-);
-
-// Get product prices
-router.get(
-  '/prices',
-  requirePermission('inventory:read'),
-  validate([query('stationId').optional().isUUID()]),
-  inventoryController.getProductPrices
-);
-
-// Update product price
-router.put(
-  '/prices',
-  requirePermission('inventory:update'),
-  validate([
-    body('stationId').optional().isUUID(),
-    body('productType').notEmpty(),
-    body('productName').notEmpty(),
-    body('unitPrice').isFloat({ min: 0 }),
-  ]),
-  inventoryController.updateProductPrice
 );
 
 // Get low stock alerts

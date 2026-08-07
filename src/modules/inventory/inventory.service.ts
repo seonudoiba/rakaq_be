@@ -229,10 +229,8 @@ export class InventoryService {
     const newLevel = Math.max(0, tank.currentLevel - actualQuantity);
     const percentage = (newLevel / tank.capacity) * 100;
     
-    // Get thresholds from settings
     const thresholds = await this.stationSettingsService.getStockThresholds(stationId);
     
-    // Determine status based on percentage
     let status: 'NORMAL' | 'WARNING' | 'CRITICAL' = 'NORMAL';
     if (percentage <= thresholds.criticalStockThreshold) {
       status = 'CRITICAL';
@@ -250,7 +248,6 @@ export class InventoryService {
       },
     });
 
-    // Log inventory change
     await prisma.inventoryLog.create({
       data: {
         stationId,
@@ -373,17 +370,14 @@ export class InventoryService {
   }
 
   async performAudit(stationId: string, data: any) {
-    const { productType, expectedLevel, actualLevel, notes } = data;
+    const { tankId, actualLevel, notes } = data;
 
-    const tank = await prisma.tank.findFirst({
-      where: {
-        stationId,
-        productType,
-      },
+    const tank = await prisma.tank.findUnique({
+      where: { id: tankId },
     });
 
     if (!tank) {
-      throw new AppError('Tank not found for this product type', 404);
+      throw new AppError('Tank not found', 404);
     }
 
     const updatedTank = await this.updateTankLevel(tank.id, {
@@ -395,10 +389,10 @@ export class InventoryService {
       data: {
         stationId,
         tankId: tank.id,
-        productType,
-        previousLevel: expectedLevel,
+        productType: tank.productType,
+        previousLevel: tank.currentLevel,
         newLevel: actualLevel,
-        adjustment: actualLevel - expectedLevel,
+        adjustment: actualLevel - tank.currentLevel,
         reason: `Audit: ${notes || 'Physical count'}`,
         userId: 'system',
       },
@@ -429,26 +423,52 @@ export class InventoryService {
     return tanks;
   }
 
-  async getProductPrices(stationId?: string) {
+  // FIXED: Get product prices with region support
+  async getProductPrices(stationId?: string, regionId?: string) {
     const defaultPrices = [
-      { productType: 'PMS', productName: 'Premium Motor Spirit', unitPrice: 650 },
-      { productType: 'AGO', productName: 'Automotive Gas Oil', unitPrice: 1200 },
-      { productType: 'DPK', productName: 'Dual Purpose Kerosene', unitPrice: 950 },
+      { productType: 'PMS', productName: 'Premium Motor Spirit', unitPrice: 850 },
+      { productType: 'AGO', productName: 'Automotive Gas Oil', unitPrice: 950 },
+      { productType: 'DPK', productName: 'Dual Purpose Kerosene', unitPrice: 500 },
+      { productType: 'LPG', productName: 'Liquefied Petroleum Gas', unitPrice: 1200 },
     ];
 
     try {
+      let where: any = {};
+      
+      if (stationId) {
+        where = { OR: [{ stationId }, { stationId: null }] };
+      } else if (regionId) {
+        // Get all stations in the region
+        const stations = await prisma.station.findMany({
+          where: { regionId },
+          select: { id: true },
+        });
+        const stationIds = stations.map(s => s.id);
+        where = { 
+          OR: [
+            { stationId: { in: stationIds } },
+            { stationId: null }
+          ]
+        };
+      } else {
+        where = { stationId: null };
+      }
+
       const prices = await prisma.productPrice.findMany({
-        where: stationId
-          ? { OR: [{ stationId }, { stationId: null }] }
-          : { stationId: null },
+        where,
       });
 
+      // Merge default prices with database prices
       return defaultPrices.map((dp) => {
-        const stationPrice = stationId ? prices.find((p) => p.stationId === stationId && p.productType === dp.productType) : null;
-        const globalPrice = prices.find((p) => p.stationId === null && p.productType === dp.productType);
-        const found = stationPrice || globalPrice;
+        const found = prices.find((p) => p.productType === dp.productType);
         return found
-          ? { ...dp, id: found.id, productName: found.productName, unitPrice: found.unitPrice, stationId: found.stationId }
+          ? { 
+              id: found.id, 
+              productType: found.productType, 
+              productName: found.productName, 
+              unitPrice: found.unitPrice,
+              stationId: found.stationId 
+            }
           : dp;
       });
     } catch (err) {
@@ -457,8 +477,106 @@ export class InventoryService {
     }
   }
 
-  async updateProductPrice(data: { stationId?: string; productType: string; productName: string; unitPrice: number; userId: string }) {
-    const { stationId, productType, productName, unitPrice, userId } = data;
+  // FIXED: Update product price with scope support
+  async updateProductPrice(data: { 
+    stationId?: string; 
+    regionId?: string;
+    productType: string; 
+    productName: string; 
+    unitPrice: number; 
+    userId: string;
+    applyToAll?: boolean;
+  }) {
+    const { stationId, regionId, productType, productName, unitPrice, userId, applyToAll } = data;
+
+    // If applyToAll is true, update all station prices for this product
+    if (applyToAll) {
+      const stations = await prisma.station.findMany({
+        select: { id: true },
+      });
+
+      const results = [];
+      for (const station of stations) {
+        const existing = await prisma.productPrice.findFirst({
+          where: {
+            stationId: station.id,
+            productType,
+          },
+        });
+
+        let price;
+        if (existing) {
+          price = await prisma.productPrice.update({
+            where: { id: existing.id },
+            data: {
+              productName,
+              unitPrice,
+              updatedById: userId,
+            },
+          });
+        } else {
+          price = await prisma.productPrice.create({
+            data: {
+              stationId: station.id,
+              productType,
+              productName,
+              unitPrice,
+              updatedById: userId,
+            },
+          });
+        }
+        results.push(price);
+      }
+
+      await this.invalidateCache();
+      return results;
+    }
+
+    // If regionId is provided, update all stations in that region
+    if (regionId) {
+      const stations = await prisma.station.findMany({
+        where: { regionId },
+        select: { id: true },
+      });
+
+      const results = [];
+      for (const station of stations) {
+        const existing = await prisma.productPrice.findFirst({
+          where: {
+            stationId: station.id,
+            productType,
+          },
+        });
+
+        let price;
+        if (existing) {
+          price = await prisma.productPrice.update({
+            where: { id: existing.id },
+            data: {
+              productName,
+              unitPrice,
+              updatedById: userId,
+            },
+          });
+        } else {
+          price = await prisma.productPrice.create({
+            data: {
+              stationId: station.id,
+              productType,
+              productName,
+              unitPrice,
+              updatedById: userId,
+            },
+          });
+        }
+        results.push(price);
+      }
+
+      await this.invalidateCache();
+      return results;
+    }
+
+    // Single station update
     const targetStationId = stationId || null;
 
     const existing = await prisma.productPrice.findFirst({
